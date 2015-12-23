@@ -1,146 +1,214 @@
 package ;
 
-class SpatialHash2D {
-	var xy2e: Array<Array<Array<Int>>>;
-	var e2aabb: Map<Int,AABB>;
+@:generic
+class SpatialHash2D<T:SpatialEntity2D> {
+	public var xy2es(default,null): Map<Int,Map<Int,Array<T>>>;
+	public var nys(default,null): Map<Int,Int>;
+	public var entities(default,null): Map<T,T>;
+	public var cellsize(default,null): Float;
 
-	public var width(default,null): Int;
-	public var height(default,null): Int;
-	public var aabb(default,null): AABB;
+	public var NO_ENTITIES_ARRAY(default,null) = new Array<T>();
 
-	public inline function new( width: Int, height: Int ) {
-		this.xy2e = [for ( x in 0...width ) [for ( y in 0...height ) []]];
-		this.e2aabb = new Map<Int,AABB>();
-		this.width = width;
-		this.height = height;
-		this.aabb = new AABB( 0.0, 0.0, width-1.0, height-1.0 );
+	public inline function new( cellsize: Float ) {
+		xy2es = new Map<Int,Map<Int,Array<T>>>();
+		nys = new Map<Int,Int>();
+		entities = new Map<T,T>();
+		this.cellsize = cellsize;
 	}
 
-	public function insert( aabb: AABB, v: Int ) {
-		var oldAabb = e2aabb[v];
+	public inline function exists( e: T ) {
+		return entities.exists( e );
+	}
 
-		if ( oldAabb != null ) {
-			if ( !oldAabb.equalInt( aabb )) {
-				remove( v );		
-			}
-		} 
-			
-		if ( aabb.inside( this.aabb )) {
-			var xmin = Std.int( aabb.xmin );
-			var xmax = Std.int( aabb.xmax );
-			var ymin = Std.int( aabb.ymin );
-			var ymax = Std.int( aabb.ymax );
-			xy2e[xmin][ymin].push( v );
-			if ( ymin != ymax ) {
-				xy2e[xmin][ymax].push( v );
-			}
-			if ( xmin != xmax ) {
-				xy2e[xmax][ymin].push( v );
-				if ( ymin != ymax ) {
-					xy2e[xmax][ymax].push( v );
-				}
-			}
-			e2aabb[v] = aabb;
+	inline function doInsert( e: T, x: Int, y: Int ) {
+		if ( !xy2es.exists( x )) {
+			xy2es[x] = [y => [e]];
+			nys[x] = 1;
+		} else if ( !xy2es[x].exists( y )) {
+			xy2es[x][y] = [e];
+			nys[x] += 1;
 		} else {
-			throw 'Inserting outside of spatial hash: AABB=${aabb} id=${v}';
+			xy2es[x][y].push( e );
 		}
 	}
 
-	public function remove( v: Int ) {
-		var aabb = e2aabb[v];
-
-		if ( aabb != null ) {
-			var xmin = Std.int( aabb.xmin );
-			var xmax = Std.int( aabb.xmax );
-			var ymin = Std.int( aabb.ymin );
-			var ymax = Std.int( aabb.ymax );
-			e2aabb.remove( v );
-			xy2e[xmin][ymin].remove( v );
-			if ( ymin != ymax ) {
-				xy2e[xmin][ymax].remove( v );
-			}
-			if ( xmin != xmax ) {
-				xy2e[xmax][ymin].remove( v );
-				if ( ymin != ymax ) {
-					xy2e[xmax][ymax].remove( v );
+	inline function doRemove( e: T, x: Int, y: Int ) {	
+		var es = xy2es[x][y];
+		var i = es.indexOf( e );
+		if ( i >= 0 ) {
+			if ( es.length <= 1 ) {
+				xy2es[x].remove( y );
+				if ( nys[x] <= 1 ) {
+					xy2es.remove( x );
+					nys.remove( x );
+				} else {
+					nys[x] -= 1;
 				}
+			} else if ( i == es.length-1 ) {
+				es.pop();
+			} else {
+				es[i] = es[es.length-1];
+				es.pop();
 			}
 		}
+	}
+
+	public inline function update( e: T ) {
+		remove( e );
+		insert( e );
+	}
+
+	public function setPos( e: T, x: Float, y: Float ) {
+		if ( Std.int( e.aabb.x ) != Std.int( x ) || Std.int( e.aabb.y ) != Std.int( y )) {
+			remove( e );
+			e.aabb.x = x;
+			e.aabb.y = y;
+			insert( e );
+		} else {
+			e.aabb.x = x;
+			e.aabb.y = y;
+		}
+	}
+
+	public function setSize( e: T, width: Float, height: Float ) {
+		if ( Std.int( e.aabb.width ) != Std.int( width ) || Std.int( e.aabb.height ) != Std.int( height )) {
+			remove( e );
+			e.aabb.width = width;
+			e.aabb.height = height;
+			insert( e );
+		} else {
+			e.aabb.width = width;
+			e.aabb.height = height;
+		}
+	}
+
+	public inline function addPos( e: T, dx: Float, dy: Float ) {
+		setPos( e, e.aabb.x + dx, e.aabb.y + dy );
+	}
+
+	public inline function addSize( e: T, dwidth: Float, dheight: Float ) {
+		setSize( e, e.aabb.width + dwidth, e.aabb.height + dheight );
+	}
+
+	public inline function flip( e: T ) {
+		setSize( e, e.aabb.height, e.aabb.width );
+	}
+
+	public inline function convertCoord( x: Float ) {
+		return Std.int( x / cellsize );
+	}
+
+	public function insert( e: T ) {
+		if ( exists( e )) {
+			remove( e );
+		}
+		
+		var aabb = e.aabb;
+		var xmin = convertCoord( aabb.xmin );
+		var xmax = convertCoord( aabb.xmax );
+		var ymin = convertCoord( aabb.ymin );
+		var ymax = convertCoord( aabb.ymax );
+		
+		for ( x in xmin...xmax+1 ) {
+			for ( y in ymin...ymax+1 ) {
+				doInsert( e, x, y );
+			}
+		}
+
+		entities[e] = e;
+	}
+
+	public function remove( e: T ) {
+		if ( exists( e )) {
+			var aabb = e.aabb;
+			var xmin = convertCoord( aabb.xmin );
+			var xmax = convertCoord( aabb.xmax );
+			var ymin = convertCoord( aabb.ymin );
+			var ymax = convertCoord( aabb.ymax );	
+			
+			for ( x in xmin...xmax+1 ) {
+				for ( y in ymin...ymax+1 ) {
+					doRemove( e, x, y );
+				}
+			}
+
+			entities.remove( e );
+		}
+	}
+
+	public inline function existAt( x: Int, y: Int ) {
+		return getAt( x, y ) == NO_ENTITIES_ARRAY;
 	}
 
 	public inline function getAt( x: Int, y: Int ) {
-		return this.xy2e[x][y];
-	}
-
-	public inline function getAABB( v: Int ) {
-		return e2aabb[v];
-	}
-
-	public inline function exists( v: Int ) {
-		return e2aabb[v] != null;
-	}
-
-	public function hasIntersections( v: Int ) {
-		var aabb = getAABB( v );
-		if ( aabb != null ) {
-			var xmin = Std.int( aabb.xmin );
-			var ymin = Std.int( aabb.ymin );
-			for ( id in getAt( xmin, ymin )) if (id != v && e2aabb[id].intersects( aabb )) {
-				return true;
+		var es = NO_ENTITIES_ARRAY;
+		if ( xy2es.exists( x )) {
+			if ( xy2es[x].exists( y )) {
+				es = xy2es[x][y];
 			}
-			var xmax = Std.int( aabb.xmax );
-			if ( xmin != xmax ) {	
-				for ( id in getAt( xmax, ymin )) if (id != v && e2aabb[id].intersects( aabb )) {
-					return true;
-				}
-			}
-			var ymax = Std.int( aabb.ymax );
-			if ( ymin != ymax ) {
-				for ( id in getAt( xmin, ymax )) if (id != v && e2aabb[id].intersects( aabb )) {
-					return true;
-				}
-				if ( xmin != xmax ) {
-					for ( id in getAt( xmax, ymax )) if (id != v && e2aabb[id].intersects( aabb )) {
-						return true;
+		}
+		return es;
+	}
+
+	public function getFirstIntersection( e1: T ) {
+		if ( exists( e1 )) {
+			var aabb = e1.aabb;
+			var xmin = convertCoord( aabb.xmin );
+			var xmax = convertCoord( aabb.xmax );
+			var ymin = convertCoord( aabb.ymin );
+			var ymax = convertCoord( aabb.ymax );	
+			for ( x in xmin...xmax+1 ) {
+				for ( y in ymin...ymax+1 ) {
+					for ( e2 in getAt( x, y )) if (e2 != e1 && e2.aabb.intersects( aabb )) {
+						return e2;
 					}
 				}
 			}
 		}
-		return false;
+		return null;
 	}
 
-	public function getIntersections( v: Int ) {
-		var intersections = new Array<Int>();
-		var checked = [v => true];
-		var aabb = getAABB( v );
-		if ( aabb != null ) {
-			var xmin = Std.int( aabb.xmin );
-			var ymin = Std.int( aabb.ymin );
-			var xmax = Std.int( aabb.xmax );
-			var ymax = Std.int( aabb.ymax );
-			for ( id in getAt( xmin, ymin )) if (!checked[id] && e2aabb[id].intersects( aabb )) {
-				intersections.push( id );
-				checked[id] = true;
-			}
-			if ( xmin != xmax ) {	
-				for ( id in getAt( xmax, ymin )) if (!checked[id] && e2aabb[id].intersects( aabb )) {
-					intersections.push( id );
-					checked[id] = true;
-				}
-			}
-			if ( ymin != ymax ) {
-				for ( id in getAt( xmin, ymax )) if (!checked[id] && e2aabb[id].intersects( aabb )) {
-					intersections.push( id );
-					checked[id] = true;
-				}
-				if ( xmin != xmax ) {
-					for ( id in getAt( xmax, ymax )) if (!checked[id] && e2aabb[id].intersects( aabb )) {
-						intersections.push( id );
-						checked[id] = true;
+	public inline function hasIntersections( e: T ) {
+		return getFirstIntersection( e ) != null;
+	}
+
+	public function getIntersections( e1: T ) {
+		var intersections = new Array<T>();
+		if ( exists( e1 )) {
+			var aabb = e1.aabb;
+			var checked = [e1 => true];
+			var xmin = convertCoord( aabb.xmin );
+			var xmax = convertCoord( aabb.xmax );
+			var ymin = convertCoord( aabb.ymin );
+			var ymax = convertCoord( aabb.ymax );	
+			for ( x in xmin...xmax+1 ) {
+				for ( y in ymin...ymax+1 ) {
+					for ( e2 in getAt( x, y )) if (!checked[e2] && e2.aabb.intersects( aabb )) {
+						intersections.push( e2 );
+						checked[e2] = true;
 					}
 				}
 			}
 		}
 		return intersections;
 	}
+}
+
+private class ItersectionsIterator {
+	public function new( spatial: SpatialHash2D, e: SpatialEntity2D, xmin: Float, xmax: Float, ymin: Float, ymax: Float ) {
+		var aabb = e1.aabb;
+		var checked = [e1 => true];
+		var xmin = convertCoord( aabb.xmin );
+		var xmax = convertCoord( aabb.xmax );
+		var ymin = convertCoord( aabb.ymin );
+		var ymax = convertCoord( aabb.ymax );	
+			for ( x in xmin...xmax+1 ) {
+				for ( y in ymin...ymax+1 ) {
+					for ( e2 in getAt( x, y )) if (!checked[e2] && e2.aabb.intersects( aabb )) {
+						intersections.push( e2 );
+						checked[e2] = true;
+					}
+				}
+			}
+	}	
 }

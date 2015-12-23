@@ -27,20 +27,6 @@ class AABB {
 		return new AABB( x, y, width, height );
 	}
 
-	public inline function move( x: Float, y: Float ) {
-		return new AABB( x, y, width, height );
-	}
-
-	public inline function resize( width: Float, height: Float ) {
-		return new AABB( x, y, width, height );
-	}
-
-	public inline function flipWidthHeight() {
-		var width_ = width;
-		width = height;
-		height = width_;
-	}
-
 	public inline function intersects( aabb: AABB ) {
 		return xmin <= aabb.xmax && aabb.xmin <= xmax && ymin <= aabb.ymax && aabb.ymin <= ymax;
 	}	

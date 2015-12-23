@@ -1,2 +1,2 @@
-mkdir ~/serverhaxe/nov/misc/bc
-cp -r Export/html5/bin/* ~/serverhaxe/nov/misc/bc
+mkdir ~/serverhaxe/nov/misc/wt
+cp -r Export/html5/bin/* ~/serverhaxe/nov/misc/wt

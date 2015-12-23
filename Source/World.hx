@@ -2,73 +2,108 @@ package ;
 
 class World {
 	public var level(default,null): Level;
-	public var spatial(default,null): SpatialHash2D;
-	public var idCounter(default,null): Int = 0;
+	public var spatial(default,null): SpatialHash2D<Entity>;
+	public var activeEntities(default,null): Map<Entity,Entity>;
+	var toDestroy: Array<Entity>;
 
 	public function new( level ) {
 		this.level = level;
-		this.spatial = new SpatialHash2D( 100, 100 );
+		this.spatial = new SpatialHash2D( 32.0 );
+		this.activeEntities = new Map<Entity,Entity>();
+		this.toDestroy = [];
 		for ( e in level.entities ) {
-			e.setId( this, idCounter++ );
-			spatial.insert( e.aabb, e.id );
+			spatial.insert( e );
 		}
-		for ( e in level.passiveEntities ) {
-			e.setId( this, idCounter++ );
-			spatial.insert( e.aabb, e.id );
+	}
+
+	public function addEntity( e: Entity ) {
+		if ( !spatial.exists( e )) {
+			spatial.insert( e );
+			level.addEntity( e );
 		}
+	}
+
+	public function setActive( e: Entity, active: Bool ) {
+		if ( active ) {
+			if ( !activeEntities.exists( e )) {
+				activeEntities[e] = e;
+			}
+		} else {
+			if ( activeEntities.exists( e )) {
+				activeEntities.remove( e );
+			}
+		}
+	}
+
+	public function trySetPos( e: Entity, x: Float, y: Float ) {
+		var ok = true;
+		var x0 = e.aabb.x;
+		var y0 = e.aabb.y;
+		spatial.setPos( e, x, y );
+		if ( spatial.hasIntersections( e )) {
+			if ( !processCollisions( e )) {
+				ok = false;
+				spatial.setPos( e, x0, y0 );
+			}
+		}
+		return ok;
+	}
+
+	public inline function tryAddPos( e: Entity, dx: Float, dy: Float ) {
+		return trySetPos( e, e.aabb.x + dx, e.aabb.y + dy );
 	}
 
 	public function update( dt: Float ) {		
-		var checked = new Map<Int,Bool>();
-		for ( e in level.entities ) {
-			if ( e.update( dt )) {
-				spatial.remove( e.id );
-				spatial.insert( e.aabb, e.id );
-				if ( spatial.hasIntersections( e.id )) {
-					if (!processCollisions( e.id, spatial.getIntersections( e.id ), checked )) {
-						e.undoUpdate();
-						spatial.remove( e.id );
-						spatial.insert( e.aabb, e.id );
-					}
-					checked[e.id] = true;
+		for ( e in activeEntities ) {
+			if ( e.velocity != 0.0 ) {
+				var dx = dt*e.velocity;
+				switch ( e.direction ) {
+					case Direction.Up: tryAddPos( e, 0, -dx );
+					case Direction.Down: tryAddPos( e, 0, dx );
+					case Direction.Left: tryAddPos( e, -dx, 0 );
+					case Direction.Right: tryAddPos( e, dx, 0 );
 				}
 			}
-		}		
+		}	
+		doDestoryEntities();	
 	}
 
-	public function setDirection( id: Int, direction: Direction ) {
-		var checked = new Map<Int,Bool>();
-		var e = level.entities[id];
-		if ( e != null ) {
-			if ( e.setDirection( direction )) {
-				spatial.remove( e.id );
-				spatial.insert( e.aabb, e.id );
-				if ( spatial.hasIntersections( e.id )) {
-					if (!processCollisions( e.id, spatial.getIntersections( e.id ), checked )) {
-						e.undoDirection();
-						spatial.remove( e.id );
-						spatial.insert( e.aabb, e.id );
-					}
-					checked[e.id] = true;
+	public function trySetDirection( e: Entity, direction: Direction ) {
+		var ok = true;
+		if ( Direction.isRotated( e.direction, direction )) { 
+			spatial.flip( e );
+			if ( spatial.hasIntersections( e )) {
+				if ( !processCollisions( e )) {
+					spatial.flip( e );
+					ok = false;
+				} else {
+					e.direction = direction;
 				}
+			} else {
+				e.direction = direction;
 			}
+		} else {
+			e.direction = direction;
+		}
+		return ok;
+	}
+
+	function doDestoryEntities() {
+		while ( toDestroy.length > 0 ) {
+			var e = toDestroy.pop();
+			spatial.remove( e );
+			level.removeEntity( e );
+			activeEntities.remove( e );
 		}
 	}
 
-	inline function entityOf( id: Int ) {
-		return level.entities[id] == null ? level.passiveEntities[id]: level.entities[id];
-	}
-
 	function destroyEntity( e: Entity ) {
-		level.removeEntity( e );
-		spatial.remove( e.id );
+		toDestroy.push( e );
 	}
 
-	function processCollisions( id: Int, intersections: Array<Int>, checked: Map<Int,Bool> ) {
+	function processCollisions( e1: Entity ) {
 		var ok = true;
-		for (	otherId in intersections ) if (!checked.exists( otherId )) {
-			var e1 = entityOf( id );
-			var e2 = entityOf( otherId );
+		for (	e2 in spatial.getIntersections( e1 )) {
 			if ( e2.type < e1.type ) {
 				var tmp = e1;
 				e1 = e2;
